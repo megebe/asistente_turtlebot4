@@ -14,7 +14,7 @@ class NodoEscuchaMic(Node):
         self.archivo_wav_temp = '/tmp/mic_temp.wav'
 
         # Cambiar si el micrófono no responde
-        self.dispositivo_mic = 'plughw:0,1'
+        self.dispositivo_mic = 'plughw:0,0'
 
         self.periodo_timer = 5.0  # segundos entre grabaciones
         self.create_timer(self.periodo_timer, self.escuchar_y_transcribir)
@@ -36,11 +36,12 @@ class NodoEscuchaMic(Node):
                 self.archivo_wav_temp
             ], check=True)
 
-            # Transcribir con whisper-cli
+            # Transcribir con whisper-cli (sin GPU para evitar fallos de inicializacion)
             resultado = subprocess.run([
                 f'{self.ruta_whisper}/build/bin/whisper-cli',
                 '-m', self.archivo_modelo,
                 '-f', self.archivo_wav_temp,
+                '--no-gpu',
                 '--output-txt'
             ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 

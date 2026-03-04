@@ -20,18 +20,18 @@ from PyQt6.QtGui import QImage, QPixmap, QFont, QColor, QPainter
 from PyQt6.QtCore import Qt, pyqtSignal, QObject
 
 # Puente de señales thread-safe entre ROS2 y Qt
-class PuenteSeñales(QObject):
-    señal_bateria = pyqtSignal(str)
-    señal_temperatura = pyqtSignal(str)
-    señal_acople = pyqtSignal(str)
-    señal_camara = pyqtSignal(QImage)
-    señal_texto_voz = pyqtSignal(str)
-    señal_comando_voz = pyqtSignal(str)
-    señal_objetos = pyqtSignal(str)
-    señal_laser = pyqtSignal(str)
-    señal_imu = pyqtSignal(str)
+class PuenteSignales(QObject):
+    senal_bateria = pyqtSignal(str)
+    senal_temperatura = pyqtSignal(str)
+    senal_acople = pyqtSignal(str)
+    senal_camara = pyqtSignal(QImage)
+    senal_texto_voz = pyqtSignal(str)
+    senal_comando_voz = pyqtSignal(str)
+    senal_objetos = pyqtSignal(str)
+    senal_laser = pyqtSignal(str)
+    senal_imu = pyqtSignal(str)
 
-puente = PuenteSeñales()
+puente = PuenteSignales()
 
 
 class NodoDashboard(Node):
@@ -59,11 +59,11 @@ class NodoDashboard(Node):
 
     def cb_bateria(self, msg):
         porcentaje = int(msg.percentage * 100)
-        puente.señal_bateria.emit(f'{porcentaje}%')
+        puente.senal_bateria.emit(f'{porcentaje}%')
 
     def cb_acople(self, msg):
         estado = 'Acoplado' if msg.is_docked else 'Desacoplado'
-        puente.señal_acople.emit(estado)
+        puente.senal_acople.emit(estado)
 
     def cb_imu(self, msg):
         self.cnt_imu += 1
@@ -72,14 +72,14 @@ class NodoDashboard(Node):
                 f'{msg.linear_acceleration.z:.2f})')
         if self.cnt_imu % 10 == 0:
             self.get_logger().debug(f'IMU: {info}')
-        puente.señal_imu.emit(info)
+        puente.senal_imu.emit(info)
 
     def cb_laser(self, msg):
         self.cnt_laser += 1
         info = f'Rayos: {len(msg.ranges)}, Min: {msg.angle_min:.2f}, Max: {msg.angle_max:.2f}'
         if self.cnt_laser % 5 == 0:
             self.get_logger().debug(f'Laser: {info}')
-        puente.señal_laser.emit(info)
+        puente.senal_laser.emit(info)
 
     def cb_camara(self, msg):
         try:
@@ -89,7 +89,7 @@ class NodoDashboard(Node):
             qt_imagen = QImage(imagen_cv.data, w, h, 3 * w, QImage.Format.Format_RGB888)
             if self.cnt_camara % 10 == 0:
                 self.get_logger().info(f'Camara: frame {self.cnt_camara} ({w}x{h})')
-            puente.señal_camara.emit(qt_imagen)
+            puente.senal_camara.emit(qt_imagen)
         except Exception as e:
             self.get_logger().error(f'Error camara: {e}')
 
@@ -98,17 +98,17 @@ class NodoDashboard(Node):
             if 'temperature' in estado.name.lower():
                 for valor in estado.values:
                     if 'temperature' in valor.key.lower():
-                        puente.señal_temperatura.emit(f'{valor.value}°C')
+                        puente.senal_temperatura.emit(f'{valor.value}°C')
                         return
 
     def cb_texto_voz(self, msg):
-        puente.señal_texto_voz.emit(msg.data)
+        puente.senal_texto_voz.emit(msg.data)
 
     def cb_comando_voz(self, msg):
-        puente.señal_comando_voz.emit(msg.data)
+        puente.senal_comando_voz.emit(msg.data)
 
     def cb_objetos(self, msg):
-        puente.señal_objetos.emit(msg.data)
+        puente.senal_objetos.emit(msg.data)
 
 
 class VentanaDashboard(QMainWindow):
@@ -187,14 +187,14 @@ class VentanaDashboard(QMainWindow):
         layout_principal.addLayout(layout_contenido)
 
         # Conectar señales
-        puente.señal_bateria.connect(lambda v: self.etiq_bateria.setText(f'Bateria: {v}'))
-        puente.señal_acople.connect(lambda v: self.etiq_acople.setText(f'Acople: {v}'))
-        puente.señal_imu.connect(lambda v: self.etiq_imu.setText(f'IMU: {v[:35]}...'))
-        puente.señal_laser.connect(lambda v: self.etiq_laser.setText(f'Laser: {v[:35]}...'))
-        puente.señal_camara.connect(self._actualizar_camara)
-        puente.señal_texto_voz.connect(self.texto_voz.setText)
-        puente.señal_comando_voz.connect(self.texto_comando.setText)
-        puente.señal_objetos.connect(self.texto_objetos.setText)
+        puente.senal_bateria.connect(lambda v: self.etiq_bateria.setText(f'Bateria: {v}'))
+        puente.senal_acople.connect(lambda v: self.etiq_acople.setText(f'Acople: {v}'))
+        puente.senal_imu.connect(lambda v: self.etiq_imu.setText(f'IMU: {v[:35]}...'))
+        puente.senal_laser.connect(lambda v: self.etiq_laser.setText(f'Laser: {v[:35]}...'))
+        puente.senal_camara.connect(self._actualizar_camara)
+        puente.senal_texto_voz.connect(self.texto_voz.setText)
+        puente.senal_comando_voz.connect(self.texto_comando.setText)
+        puente.senal_objetos.connect(self.texto_objetos.setText)
 
     def _actualizar_camara(self, qt_imagen):
         pixmap = QPixmap.fromImage(qt_imagen)
