@@ -5,106 +5,78 @@ from std_msgs.msg import String
 from cv_bridge import CvBridge
 import cv2
 from ultralytics import YOLO
-import numpy as np
 
-class ObjectDetectorNode(Node):
+class NodoDetectorObjetos(Node):
     def __init__(self):
         super().__init__('object_detector_node')
-        self.bridge = CvBridge()
-        self.model = YOLO('yolov8n.pt')  # Using YOLOv8 Nano model
 
-        self.detections = []  # List of detected objects
-        self.last_frame = None
+        self.puente_cv = CvBridge()
+        self.modelo = YOLO('yolov8n.pt')
+        self.detecciones = []
 
-        self.image_sub = self.create_subscription(
-            Image,
-            '/oakd/rgb/preview/image_raw',
-            self.image_callback,
-            10)
+        self.create_subscription(Image, '/oakd/rgb/preview/image_raw', self.cb_imagen, 10)
+        self.create_subscription(String, '/voice_command', self.cb_comando, 10)
 
-        self.command_sub = self.create_subscription(
-            String,
-            '/voice_command',
-            self.command_callback,
-            10)
+        self.pub_imagen = self.create_publisher(Image, '/yolo_image_raw', 10)
+        self.pub_objetos = self.create_publisher(String, '/detected_objects', 10)
 
-        self.image_pub = self.create_publisher(
-            Image,
-            '/yolo_image_raw',
-            10)
+        self.get_logger().info('Detector de objetos iniciado.')
 
-        self.detected_objects_pub = self.create_publisher(
-            String,
-            '/detected_objects',
-            10)
-
-        self.get_logger().info('✅ Object Detector Node Started.')
-
-    def image_callback(self, msg):
+    def cb_imagen(self, msg):
         try:
-            cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
-            self.last_frame = cv_image
-            self.run_detection(cv_image)
+            imagen_cv = self.puente_cv.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+            self.ejecutar_deteccion(imagen_cv)
         except Exception as e:
-            self.get_logger().error(f'Error converting image: {str(e)}')
+            self.get_logger().error(f'Error al convertir imagen: {e}')
 
-    def run_detection(self, frame):
-        results = self.model.predict(source=frame, conf=0.5, verbose=False)[0]
+    def ejecutar_deteccion(self, frame):
+        resultados = self.modelo.predict(source=frame, conf=0.5, verbose=False)[0]
 
-        detected_labels = []
-        annotated_frame = frame.copy()
+        etiquetas_detectadas = []
+        frame_anotado = frame.copy()
 
-        for box in results.boxes:
-            cls = int(box.cls[0])
-            label = self.model.names[cls]
-            conf = float(box.conf[0])
+        for caja in resultados.boxes:
+            clase = int(caja.cls[0])
+            etiqueta = self.modelo.names[clase]
+            confianza = float(caja.conf[0])
+            etiquetas_detectadas.append(etiqueta)
 
-            detected_labels.append(label)
-
-            # Draw bounding boxes
-            x1, y1, x2, y2 = map(int, box.xyxy[0])
-            cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-
-            # Put label and confidence
-            text = f"{label} {conf:.2f}"
-            cv2.putText(annotated_frame, text, (x1, y1 - 10),
+            # Dibujar bounding box
+            x1, y1, x2, y2 = map(int, caja.xyxy[0])
+            cv2.rectangle(frame_anotado, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            texto = f'{etiqueta} {confianza:.2f}'
+            cv2.putText(frame_anotado, texto, (x1, y1 - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-        self.detections = list(set(detected_labels))  # Unique list
+        self.detecciones = list(set(etiquetas_detectadas))
 
-        # Publish annotated image
+        # Publicar imagen anotada
         try:
-            yolo_msg = self.bridge.cv2_to_imgmsg(annotated_frame, encoding='bgr8')
-            self.image_pub.publish(yolo_msg)
+            msg_yolo = self.puente_cv.cv2_to_imgmsg(frame_anotado, encoding='bgr8')
+            self.pub_imagen.publish(msg_yolo)
         except Exception as e:
-            self.get_logger().error(f'Error publishing YOLO image: {str(e)}')
+            self.get_logger().error(f'Error al publicar imagen YOLO: {e}')
 
-        # Publish detected objects string
-        if self.detections:
-            detected_str = ', '.join(self.detections)
-            full_message = f"I see: {detected_str}"
-        else:
-            full_message = "I do not see anything right now."
+        # Publicar objetos detectados
+        mensaje = f'Veo: {", ".join(self.detecciones)}' if self.detecciones else 'No veo nada.'
+        msg_objetos = String()
+        msg_objetos.data = mensaje
+        self.pub_objetos.publish(msg_objetos)
 
-        detected_msg = String()
-        detected_msg.data = full_message
-        self.detected_objects_pub.publish(detected_msg)
-
-    def command_callback(self, msg):
+    def cb_comando(self, msg):
         if msg.data == 'what_do_you_see':
-            if self.detections:
-                detected_str = ', '.join(self.detections)
-                self.get_logger().info(f'I see: {detected_str}')
+            if self.detecciones:
+                self.get_logger().info(f'Veo: {", ".join(self.detecciones)}')
             else:
-                self.get_logger().info('I do not see anything right now.')
+                self.get_logger().info('No veo nada.')
+
 
 def main(args=None):
     rclpy.init(args=args)
-    node = ObjectDetectorNode()
-    rclpy.spin(node)
-    node.destroy_node()
+    nodo = NodoDetectorObjetos()
+    rclpy.spin(nodo)
+    nodo.destroy_node()
     rclpy.shutdown()
 
 if __name__ == '__main__':
     main()
-

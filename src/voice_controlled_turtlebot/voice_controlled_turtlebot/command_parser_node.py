@@ -2,91 +2,77 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
 
-class CommandParserNode(Node):
+class NodoAnalizadorComandos(Node):
     def __init__(self):
         super().__init__('command_parser_node')
 
-        self.subscription = self.create_subscription(
-            String,
-            '/voice_text',
-            self.voice_callback,
-            10)
+        self.create_subscription(String, '/voice_text', self.cb_voz, 10)
+        self.pub_comando = self.create_publisher(String, '/voice_command', 10)
 
-        self.command_pub = self.create_publisher(
-            String,
-            '/voice_command',
-            10)
-
-        self.valid_commands = [
-            'move_forward', 'move_backward', 'turn_left', 'turn_right',
-            'stop', 'look_for_object', 'go_to_object', 'return_to_base',
-            'scan', 'repeat', 'dock', 'undock', 'spin', 'shake', 'take_a_picture',
-            'home_position', 'list_position', 'relax_position', 'wave_emote', 'grasp'
+        self.comandos_validos = [
+            # Movimiento
+            'adelante', 'atrás', 'izquierda', 'derecha', 'parar',
+            # Objetos
+            'buscar objeto', 'ir al objeto', 'volver a base',
+            # Acciones
+            'escanear', 'repetir', 'acoplar', 'desacoplar', 'girar', 'sacudir', 'tomar foto'
         ]
 
-        self.current_command = None
-        self.publish_timer = None
-        self.elapsed_time = 0.0
+        self.comando_actual = None
+        self.timer_publicacion = None
+        self.tiempo_transcurrido = 0.0
 
-        self.get_logger().info('Command Parser Node Started.')
+        self.get_logger().info('Analizador de comandos iniciado.')
 
-    def voice_callback(self, msg):
-        text = msg.data.lower()
-        self.get_logger().info(f'Voice text received: {text}')
+    def cb_voz(self, msg):
+        texto = msg.data.lower()
+        self.get_logger().info(f'Texto recibido: {texto}')
 
-        found_command = None
-
-        #for keyword in self.valid_commands:
-            #if keyword.replace('_', ' ') in text:
-                #found_command = keyword
-                #break
-        for keyword in sorted(self.valid_commands, key=lambda k: -len(k)):
-            if keyword.replace('_', ' ') in text:
-                found_command = keyword
+        comando_encontrado = None
+        # Buscar primero los comandos más largos para evitar falsos positivos
+        for palabra in sorted(self.comandos_validos, key=lambda k: -len(k)):
+            if palabra.replace('_', ' ') in texto:
+                comando_encontrado = palabra
                 break
 
-
-        if found_command:
-            self.get_logger().info(f'Parsed Command: {found_command}')
-            self.start_command_publish(found_command)
+        if comando_encontrado:
+            self.get_logger().info(f'Comando detectado: {comando_encontrado}')
+            self.iniciar_publicacion(comando_encontrado)
         else:
-            self.get_logger().info('No valid command detected.')
+            self.get_logger().info('Ningun comando valido detectado.')
 
-    def start_command_publish(self, command):
-        self.current_command = command
-        self.elapsed_time = 0.0
+    def iniciar_publicacion(self, comando):
+        self.comando_actual = comando
+        self.tiempo_transcurrido = 0.0
 
-        if self.publish_timer:
-            self.publish_timer.cancel()
+        if self.timer_publicacion:
+            self.timer_publicacion.cancel()
+        self.timer_publicacion = self.create_timer(0.5, self.publicar_comando)
 
-        # Publish every 0.5 sec (2Hz)
-        self.publish_timer = self.create_timer(0.5, self.publish_command)
-
-    def publish_command(self):
-        if self.elapsed_time >= 5.0:
-            # Stop after 5 seconds
-            self.get_logger().info('Finished publishing command.')
-            if self.publish_timer:
-                self.publish_timer.cancel()
-                self.publish_timer = None
-            self.current_command = None
+    def publicar_comando(self):
+        # Publicar durante 5 segundos y luego parar
+        if self.tiempo_transcurrido >= 5.0:
+            self.get_logger().info('Publicacion de comando finalizada.')
+            if self.timer_publicacion:
+                self.timer_publicacion.cancel()
+                self.timer_publicacion = None
+            self.comando_actual = None
             return
 
-        if self.current_command:
+        if self.comando_actual:
             msg = String()
-            msg.data = self.current_command
-            self.command_pub.publish(msg)
-            self.get_logger().info(f'Published command: {self.current_command}')
+            msg.data = self.comando_actual
+            self.pub_comando.publish(msg)
 
-        self.elapsed_time += 0.5
+        self.tiempo_transcurrido += 0.5
+
 
 def main(args=None):
     rclpy.init(args=args)
-    node = CommandParserNode()
-    rclpy.spin(node)
-    node.destroy_node()
+    nodo = NodoAnalizadorComandos()
+    rclpy.spin(nodo)
+    nodo.destroy_node()
     rclpy.shutdown()
 
 if __name__ == '__main__':
     main()
-

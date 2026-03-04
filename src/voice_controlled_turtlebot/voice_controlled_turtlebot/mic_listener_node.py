@@ -2,80 +2,71 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
 import subprocess
-import os
 
-class MicListenerNode(Node):
+class NodoEscuchaMic(Node):
     def __init__(self):
         super().__init__('mic_listener_node')
 
-        # Publisher
-        self.voice_text_pub = self.create_publisher(String, '/voice_text', 10)
+        self.pub_texto_voz = self.create_publisher(String, '/voice_text', 10)
 
-        # Important paths
-        self.whispercpp_path = '/home/anushkasatav/whisper.cpp'  # your whisper.cpp folder
-        # self.model_file = 'models/ggml-tiny.en.bin'  # inside whisper.cpp/models/
-        self.model_file = 'models/ggml-base.en.bin'
-        self.temp_wav_file = '/tmp/mic_temp.wav'  # temporary audio storage
+        self.ruta_whisper = '/home/m/voice_controlled_turtlebot/whisper.cpp'
+        self.archivo_modelo = f'{self.ruta_whisper}/models/ggml-base.bin'
+        self.archivo_wav_temp = '/tmp/mic_temp.wav'
 
-        # How often to record+transcribe
-        self.timer_period = 5.0  # seconds
-        self.timer = self.create_timer(self.timer_period, self.listen_and_transcribe)
+        # Cambiar si el micrófono no responde
+        self.dispositivo_mic = 'plughw:0,1'
 
-        self.get_logger().info('Mic Listener Node Started!')
+        self.periodo_timer = 5.0  # segundos entre grabaciones
+        self.create_timer(self.periodo_timer, self.escuchar_y_transcribir)
 
-    def listen_and_transcribe(self):
-        self.get_logger().info('🎤 Recording from mic...')
+        self.get_logger().info(f'Escucha mic iniciada (dispositivo: {self.dispositivo_mic})')
 
+    def escuchar_y_transcribir(self):
+        self.get_logger().info(f'Grabando desde {self.dispositivo_mic}...')
         try:
-            # 1. Record audio (3 seconds)
+            # Grabar 4 segundos de audio
             subprocess.run([
                 'arecord',
-                '-D', 'plughw:0,0',    # IMPORTANT: correct mic device
-                '-f', 'S16_LE',        # 16-bit Little Endian
-                '-r', '16000',         # 16kHz sampling
-                '-c', '1',             # Mono
+                '-D', self.dispositivo_mic,
+                '-f', 'S16_LE',
+                '-r', '16000',
+                '-c', '1',
                 '-t', 'wav',
-                '-d', '4',             # record 4 seconds
-                self.temp_wav_file
+                '-d', '4',
+                self.archivo_wav_temp
             ], check=True)
 
-            self.get_logger().info('📄 Audio recorded. Transcribing...')
-
-            # 2. Run whisper-cli to transcribe
-            result = subprocess.run([
-                './whisper-cli',
-                '-m', self.model_file,
-                '-f', self.temp_wav_file,
+            # Transcribir con whisper-cli
+            resultado = subprocess.run([
+                f'{self.ruta_whisper}/build/bin/whisper-cli',
+                '-m', self.archivo_modelo,
+                '-f', self.archivo_wav_temp,
                 '--output-txt'
-            ],
-            cwd=self.whispercpp_path,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True)
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
-            text_output = result.stdout.strip()
+            texto_salida = resultado.stdout.strip()
 
-            if text_output:
-                self.get_logger().info(f'📝 Whisper output: {text_output}')
+            if resultado.returncode != 0:
+                self.get_logger().error(f'Error whisper: {resultado.stderr}')
 
-                # 3. Publish transcription
+            if texto_salida:
+                self.get_logger().info(f'Transcripcion: {texto_salida}')
                 msg = String()
-                msg.data = text_output.lower()
-                self.voice_text_pub.publish(msg)
-                self.get_logger().info(f'📢 Published to /voice_text: {msg.data}')
+                msg.data = texto_salida.lower()
+                self.pub_texto_voz.publish(msg)
             else:
-                self.get_logger().warn('⚠️ No transcription detected.')
+                self.get_logger().warn('Sin transcripcion detectada.')
 
         except Exception as e:
-            self.get_logger().error(f'❌ Error: {e}')
+            self.get_logger().error(f'Error: {e}')
+
 
 def main(args=None):
     rclpy.init(args=args)
-    node = MicListenerNode()
-    rclpy.spin(node)
-    node.destroy_node()
+    nodo = NodoEscuchaMic()
+    rclpy.spin(nodo)
+    nodo.destroy_node()
     rclpy.shutdown()
 
 if __name__ == '__main__':
     main()
-

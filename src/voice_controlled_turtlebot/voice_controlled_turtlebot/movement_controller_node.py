@@ -10,200 +10,184 @@ from cv_bridge import CvBridge
 import cv2
 import os
 
-class MovementControllerNode(Node):
+class NodoControlMovimiento(Node):
     def __init__(self):
         super().__init__('movement_controller_node')
 
-        self.subscription = self.create_subscription(
-            String,
-            '/voice_command',
-            self.command_callback,
-            10)
+        self.create_subscription(String, '/voice_command', self.cb_comando, 10)
 
-        self.cmd_vel_pub = self.create_publisher(
-            Twist,
-            '/rpi_13/cmd_vel',
-            10)
+        self.pub_cmd_vel = self.create_publisher(Twist, '/rpi_13/cmd_vel', 10)
 
-        self.dock_client = ActionClient(self, Dock, '/rpi_13/dock')
-        self.undock_client = ActionClient(self, Undock, '/rpi_13/undock')
+        self.cliente_acoplar = ActionClient(self, Dock, '/rpi_13/dock')
+        self.cliente_desacoplar = ActionClient(self, Undock, '/rpi_13/undock')
 
-        self.is_docked = None
-        self.create_subscription(DockStatus, '/rpi_13/dock_status', self.dock_status_cb, 10)
+        self.esta_acoplado = None
+        self.create_subscription(DockStatus, '/rpi_13/dock_status', self.cb_estado_acople, 10)
 
-        self.docking_in_progress = False
-        self.undocking_in_progress = False
-        self.last_sent_goal = None  # 'dock', 'undock', or None
+        self.acoplando = False
+        self.desacoplando = False
+        self.ultimo_objetivo = None  # 'acoplar', 'desacoplar' o None
 
-        self.image_sub = self.create_subscription(Image, '/oakd/rgb/preview/image_raw', self.image_callback, 10)
-        self.bridge = CvBridge()
-        self.last_image = None
+        self.create_subscription(Image, '/oakd/rgb/preview/image_raw', self.cb_imagen, 10)
+        self.puente_cv = CvBridge()
+        self.ultima_imagen = None
 
-        self.current_twist = Twist()
-        self.moving = False
-        self.publish_timer = self.create_timer(0.1, self.publish_movement)
+        self.twist_actual = Twist()
+        self.en_movimiento = False
+        self.create_timer(0.1, self.publicar_movimiento)
 
-        self.get_logger().info('Movement Controller Node Started.')
+        self.get_logger().info('Control de movimiento iniciado.')
 
-    def dock_status_cb(self, msg):
-        self.is_docked = msg.is_docked
+    def cb_estado_acople(self, msg):
+        self.esta_acoplado = msg.is_docked
 
-    def image_callback(self, msg):
-        self.last_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+    def cb_imagen(self, msg):
+        self.ultima_imagen = self.puente_cv.imgmsg_to_cv2(msg, desired_encoding='bgr8')
 
-    def command_callback(self, msg):
-        command = msg.data.lower()
+    def cb_comando(self, msg):
+        comando = msg.data.lower()
+        self.twist_actual = Twist()
+        self.en_movimiento = False
 
-        self.current_twist = Twist()
-        self.moving = False
-
-        if command == 'move_forward':
-            self.current_twist.linear.x = 0.1
-            self.moving = True
-        elif command == 'move_backward':
-            self.current_twist.linear.x = -0.1
-            self.moving = True
-        elif command == 'turn_left':
-            self.current_twist.angular.z = 0.33
-            self.moving = True
-        elif command == 'turn_right':
-            self.current_twist.angular.z = -0.33
-            self.moving = True
-        elif command == 'spin':
-            self.current_twist.angular.z = 1.0
-            self.moving = True
-        elif command == 'shake':
-            self.start_shake()
-        elif command == 'stop':
-            self.stop_robot()
-        elif command == 'dock':
-            self.send_dock_goal()
-        elif command == 'undock':
-            self.send_undock_goal()
-        elif command == 'take_a_picture':
-            self.save_snapshot()
-        elif command in ["look_for_object", "go_to_object", "return_to_base", "scan"]:
-            self.get_logger().info(f"Received non-movement command: {command} (not handled here)")
+        if comando == 'move_forward':
+            self.twist_actual.linear.x = 0.1
+            self.en_movimiento = True
+        elif comando == 'move_backward':
+            self.twist_actual.linear.x = -0.1
+            self.en_movimiento = True
+        elif comando == 'turn_left':
+            self.twist_actual.angular.z = 0.33
+            self.en_movimiento = True
+        elif comando == 'turn_right':
+            self.twist_actual.angular.z = -0.33
+            self.en_movimiento = True
+        elif comando == 'spin':
+            self.twist_actual.angular.z = 1.0
+            self.en_movimiento = True
+        elif comando == 'shake':
+            self.iniciar_sacudida()
+        elif comando == 'stop':
+            self.detener_robot()
+        elif comando == 'dock':
+            self.enviar_objetivo_acoplar()
+        elif comando == 'undock':
+            self.enviar_objetivo_desacoplar()
+        elif comando == 'take_a_picture':
+            self.guardar_foto()
+        elif comando in ['look_for_object', 'go_to_object', 'return_to_base', 'scan']:
+            self.get_logger().info(f'Comando no manejado aqui: {comando}')
         else:
-            self.get_logger().info(f'Unknown command: {command}')
+            self.get_logger().info(f'Comando desconocido: {comando}')
 
-    def publish_movement(self):
-        if self.moving:
-            self.cmd_vel_pub.publish(self.current_twist)
+    def publicar_movimiento(self):
+        if self.en_movimiento:
+            self.pub_cmd_vel.publish(self.twist_actual)
 
-    def stop_robot(self):
-        self.moving = False
-        stop_twist = Twist()
-        self.cmd_vel_pub.publish(stop_twist)
-        self.get_logger().info('Robot stopped.')
+    def detener_robot(self):
+        self.en_movimiento = False
+        self.pub_cmd_vel.publish(Twist())
+        self.get_logger().info('Robot detenido.')
 
-    def start_shake(self):
-        self.get_logger().info('Starting SHAKE movement.')
-        self.shake_sequence = [(-1.0, 5), (1.0, 5), (-1.0, 5), (1.0, 5)]
-        self.shake_index = 0
-        self.shake_timer = self.create_timer(0.5, self.shake_step)
+    def iniciar_sacudida(self):
+        self.get_logger().info('Iniciando sacudida.')
+        self.secuencia_sacudida = [(-1.0, 5), (1.0, 5), (-1.0, 5), (1.0, 5)]
+        self.indice_sacudida = 0
+        self.timer_sacudida = self.create_timer(0.5, self.paso_sacudida)
 
-    def shake_step(self):
-        if self.shake_index < len(self.shake_sequence):
-            angular_z, _ = self.shake_sequence[self.shake_index]
-            self.current_twist = Twist()
-            self.current_twist.angular.z = angular_z
-            self.cmd_vel_pub.publish(self.current_twist)
-            self.shake_index += 1
+    def paso_sacudida(self):
+        if self.indice_sacudida < len(self.secuencia_sacudida):
+            vel_angular, _ = self.secuencia_sacudida[self.indice_sacudida]
+            self.twist_actual = Twist()
+            self.twist_actual.angular.z = vel_angular
+            self.pub_cmd_vel.publish(self.twist_actual)
+            self.indice_sacudida += 1
         else:
-            self.shake_timer.cancel()
-            self.stop_robot()
+            self.timer_sacudida.cancel()
+            self.detener_robot()
 
-    def send_dock_goal(self):
-        if self.last_sent_goal == 'dock':
-            self.get_logger().warn("Dock already sent. Ignoring.")
+    def enviar_objetivo_acoplar(self):
+        if self.ultimo_objetivo == 'acoplar':
+            self.get_logger().warn('Acople ya enviado.')
             return
-        if self.is_docked is True:
-            self.get_logger().warn("Already docked. Not sending dock goal.")
+        if self.esta_acoplado is True:
+            self.get_logger().warn('Ya esta acoplado.')
             return
-        if self.docking_in_progress:
-            self.get_logger().warn("Dock already in progress. Ignoring duplicate.")
-            return
-
-        self.get_logger().info('Sending DOCK goal.')
-        if not self.dock_client.wait_for_server(timeout_sec=2.0):
-            self.get_logger().error('Dock action server not available.')
+        if self.acoplando:
+            self.get_logger().warn('Acoplando en progreso.')
             return
 
-        self.docking_in_progress = True
-        self.last_sent_goal = 'dock'
-        goal = Dock.Goal()
-        future = self.dock_client.send_goal_async(goal)
-        future.add_done_callback(self.handle_dock_result)
-
-    def handle_dock_result(self, future):
-        goal_handle = future.result()
-        if not goal_handle.accepted:
-            self.get_logger().warn('Dock goal rejected.')
-            self.docking_in_progress = False
+        if not self.cliente_acoplar.wait_for_server(timeout_sec=2.0):
+            self.get_logger().error('Servidor de acople no disponible.')
             return
 
-        self.get_logger().info('Dock goal accepted.')
-        result_future = goal_handle.get_result_async()
-        result_future.add_done_callback(lambda f: self.finish_docking())
+        self.get_logger().info('Enviando objetivo: acoplar.')
+        self.acoplando = True
+        self.ultimo_objetivo = 'acoplar'
+        futuro = self.cliente_acoplar.send_goal_async(Dock.Goal())
+        futuro.add_done_callback(self.manejar_resultado_acople)
 
-    def finish_docking(self):
-        self.get_logger().info('✅ Dock action finished.')
-        self.docking_in_progress = False
-
-    def send_undock_goal(self):
-        if self.last_sent_goal == 'undock':
-            self.get_logger().warn("Undock already sent. Ignoring.")
+    def manejar_resultado_acople(self, futuro):
+        manejador = futuro.result()
+        if not manejador.accepted:
+            self.get_logger().warn('Objetivo de acople rechazado.')
+            self.acoplando = False
             return
-        if self.is_docked is False:
-            self.get_logger().warn("Already undocked. Not sending undock goal.")
-            return
-        if self.undocking_in_progress:
-            self.get_logger().warn("Undock already in progress. Ignoring duplicate.")
-            return
+        self.get_logger().info('Objetivo de acople aceptado.')
+        manejador.get_result_async().add_done_callback(lambda f: self.finalizar_acople())
 
-        self.get_logger().info('Sending UNDOCK goal.')
-        if not self.undock_client.wait_for_server(timeout_sec=2.0):
-            self.get_logger().error('Undock action server not available.')
+    def finalizar_acople(self):
+        self.get_logger().info('Acople completado.')
+        self.acoplando = False
+
+    def enviar_objetivo_desacoplar(self):
+        if self.ultimo_objetivo == 'desacoplar':
+            self.get_logger().warn('Desacople ya enviado.')
             return
-
-        self.undocking_in_progress = True
-        self.last_sent_goal = 'undock'
-        goal = Undock.Goal()
-        future = self.undock_client.send_goal_async(goal)
-        future.add_done_callback(self.handle_undock_result)
-
-    def handle_undock_result(self, future):
-        goal_handle = future.result()
-        if not goal_handle.accepted:
-            self.get_logger().warn('Undock goal rejected.')
-            self.undocking_in_progress = False
+        if self.esta_acoplado is False:
+            self.get_logger().warn('Ya esta desacoplado.')
+            return
+        if self.desacoplando:
+            self.get_logger().warn('Desacoplando en progreso.')
             return
 
-        self.get_logger().info('Undock goal accepted.')
-        result_future = goal_handle.get_result_async()
-        result_future.add_done_callback(lambda f: self.finish_undocking())
+        if not self.cliente_desacoplar.wait_for_server(timeout_sec=2.0):
+            self.get_logger().error('Servidor de desacople no disponible.')
+            return
 
-    def finish_undocking(self):
-        self.get_logger().info('✅ Undock action finished.')
-        self.undocking_in_progress = False
+        self.get_logger().info('Enviando objetivo: desacoplar.')
+        self.desacoplando = True
+        self.ultimo_objetivo = 'desacoplar'
+        futuro = self.cliente_desacoplar.send_goal_async(Undock.Goal())
+        futuro.add_done_callback(self.manejar_resultado_desacople)
 
-    def save_snapshot(self):
-        if self.last_image is not None:
-            save_path = os.path.expanduser('~/anu_ws/src/snapshot.png')
-            cv2.imwrite(save_path, self.last_image)
-            self.get_logger().info(f'📸 Snapshot saved to: {save_path}')
+    def manejar_resultado_desacople(self, futuro):
+        manejador = futuro.result()
+        if not manejador.accepted:
+            self.get_logger().warn('Objetivo de desacople rechazado.')
+            self.desacoplando = False
+            return
+        self.get_logger().info('Objetivo de desacople aceptado.')
+        manejador.get_result_async().add_done_callback(lambda f: self.finalizar_desacople())
+
+    def finalizar_desacople(self):
+        self.get_logger().info('Desacople completado.')
+        self.desacoplando = False
+
+    def guardar_foto(self):
+        if self.ultima_imagen is not None:
+            ruta = os.path.expanduser('~/voice_controlled_turtlebot/src/snapshot.png')
+            cv2.imwrite(ruta, self.ultima_imagen)
+            self.get_logger().info(f'Foto guardada: {ruta}')
         else:
-            self.get_logger().warn('No image received yet.')
+            self.get_logger().warn('Aun no se ha recibido imagen.')
 
 
 def main(args=None):
     rclpy.init(args=args)
-    node = MovementControllerNode()
-    rclpy.spin(node)
-    node.destroy_node()
+    nodo = NodoControlMovimiento()
+    rclpy.spin(nodo)
+    nodo.destroy_node()
     rclpy.shutdown()
 
 if __name__ == '__main__':
     main()
-
