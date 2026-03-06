@@ -1,15 +1,17 @@
+import os
 import rclpy
 from rclpy.node import Node
+from rclpy.action import ActionClient
 from std_msgs.msg import String
 from geometry_msgs.msg import Twist
-from rclpy.action import ActionClient
-from irobot_create_msgs.action import Dock, Undock
-from irobot_create_msgs.msg import DockStatus
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 import cv2
-import os
 
+from irobot_create_msgs.action import Dock, Undock
+from irobot_create_msgs.msg import DockStatus
+
+# Nodo que traduce comandos de voz a movimiento del robot y gestiona acciones de acople/foto
 class NodoControlMovimiento(Node):
     def __init__(self):
         super().__init__('movement_controller_node')
@@ -24,9 +26,9 @@ class NodoControlMovimiento(Node):
         self.esta_acoplado = None
         self.create_subscription(DockStatus, '/rpi_13/dock_status', self.cb_estado_acople, 10)
 
+        # Guardias para evitar envíos duplicados de acople/desacople
         self.acoplando = False
         self.desacoplando = False
-        self.ultimo_objetivo = None  # 'acoplar', 'desacoplar' o None
 
         self.create_subscription(Image, '/oakd/rgb/preview/image_raw', self.cb_imagen, 10)
         self.puente_cv = CvBridge()
@@ -34,6 +36,7 @@ class NodoControlMovimiento(Node):
 
         self.twist_actual = Twist()
         self.en_movimiento = False
+        # Timer a 10 Hz que publica continuamente la velocidad mientras el robot se mueve
         self.create_timer(0.1, self.publicar_movimiento)
 
         self.get_logger().info('Control de movimiento iniciado.')
@@ -46,38 +49,42 @@ class NodoControlMovimiento(Node):
 
     def cb_comando(self, msg):
         comando = msg.data.lower()
+        # Ignorar mensajes del parser que no son comandos de movimiento
+        if comando.startswith('pregunta:') or comando == 'wake':
+            return
         self.twist_actual = Twist()
         self.en_movimiento = False
 
-        if comando == 'move_forward':
+        if comando == 'adelante':
             self.twist_actual.linear.x = 0.1
             self.en_movimiento = True
-        elif comando == 'move_backward':
+        elif comando == 'atras':
             self.twist_actual.linear.x = -0.1
             self.en_movimiento = True
-        elif comando == 'turn_left':
+        elif comando == 'izquierda':
             self.twist_actual.angular.z = 0.33
             self.en_movimiento = True
-        elif comando == 'turn_right':
+        elif comando == 'derecha':
             self.twist_actual.angular.z = -0.33
             self.en_movimiento = True
-        elif comando == 'spin':
+        elif comando == 'girar':
             self.twist_actual.angular.z = 1.0
             self.en_movimiento = True
-        elif comando == 'shake':
+        elif comando == 'sacudir':
             self.iniciar_sacudida()
-        elif comando == 'stop':
+        elif comando == 'parar':
             self.detener_robot()
-        elif comando == 'dock':
+        elif comando == 'acoplar':
             self.enviar_objetivo_acoplar()
-        elif comando == 'undock':
+        elif comando == 'desacoplar':
             self.enviar_objetivo_desacoplar()
-        elif comando == 'take_a_picture':
+        elif comando == 'tomar_foto':
             self.guardar_foto()
-        elif comando in ['look_for_object', 'go_to_object', 'return_to_base', 'scan']:
-            self.get_logger().info(f'Comando no manejado aqui: {comando}')
+        elif comando in ('buscar_objeto', 'ir_al_objeto', 'volver_a_base', 'escanear'):
+            # Estos comandos los gestionarán los módulos de navegación (pendientes)
+            self.get_logger().info(f'Comando de navegación pendiente de implementar: {comando}')
         else:
-            self.get_logger().info(f'Comando desconocido: {comando}')
+            self.get_logger().warn(f'Comando desconocido: {comando}')
 
     def publicar_movimiento(self):
         if self.en_movimiento:
@@ -90,39 +97,36 @@ class NodoControlMovimiento(Node):
 
     def iniciar_sacudida(self):
         self.get_logger().info('Iniciando sacudida.')
-        self.secuencia_sacudida = [(-1.0, 5), (1.0, 5), (-1.0, 5), (1.0, 5)]
+        # Secuencia de velocidades angulares alternadas para simular sacudida
+        self.secuencia_sacudida = [-1.0, 1.0, -1.0, 1.0]
         self.indice_sacudida = 0
         self.timer_sacudida = self.create_timer(0.5, self.paso_sacudida)
 
     def paso_sacudida(self):
         if self.indice_sacudida < len(self.secuencia_sacudida):
-            vel_angular, _ = self.secuencia_sacudida[self.indice_sacudida]
-            self.twist_actual = Twist()
-            self.twist_actual.angular.z = vel_angular
-            self.pub_cmd_vel.publish(self.twist_actual)
+            twist = Twist()
+            twist.angular.z = self.secuencia_sacudida[self.indice_sacudida]
+            self.pub_cmd_vel.publish(twist)
             self.indice_sacudida += 1
         else:
             self.timer_sacudida.cancel()
             self.detener_robot()
 
+    # --- Acople ---
+
     def enviar_objetivo_acoplar(self):
-        if self.ultimo_objetivo == 'acoplar':
-            self.get_logger().warn('Acople ya enviado.')
-            return
         if self.esta_acoplado is True:
-            self.get_logger().warn('Ya esta acoplado.')
+            self.get_logger().warn('El robot ya está acoplado.')
             return
         if self.acoplando:
-            self.get_logger().warn('Acoplando en progreso.')
+            self.get_logger().warn('Acople ya en progreso.')
             return
-
         if not self.cliente_acoplar.wait_for_server(timeout_sec=2.0):
             self.get_logger().error('Servidor de acople no disponible.')
             return
 
         self.get_logger().info('Enviando objetivo: acoplar.')
         self.acoplando = True
-        self.ultimo_objetivo = 'acoplar'
         futuro = self.cliente_acoplar.send_goal_async(Dock.Goal())
         futuro.add_done_callback(self.manejar_resultado_acople)
 
@@ -139,24 +143,21 @@ class NodoControlMovimiento(Node):
         self.get_logger().info('Acople completado.')
         self.acoplando = False
 
+    # --- Desacople ---
+
     def enviar_objetivo_desacoplar(self):
-        if self.ultimo_objetivo == 'desacoplar':
-            self.get_logger().warn('Desacople ya enviado.')
-            return
         if self.esta_acoplado is False:
-            self.get_logger().warn('Ya esta desacoplado.')
+            self.get_logger().warn('El robot ya está desacoplado.')
             return
         if self.desacoplando:
-            self.get_logger().warn('Desacoplando en progreso.')
+            self.get_logger().warn('Desacople ya en progreso.')
             return
-
         if not self.cliente_desacoplar.wait_for_server(timeout_sec=2.0):
             self.get_logger().error('Servidor de desacople no disponible.')
             return
 
         self.get_logger().info('Enviando objetivo: desacoplar.')
         self.desacoplando = True
-        self.ultimo_objetivo = 'desacoplar'
         futuro = self.cliente_desacoplar.send_goal_async(Undock.Goal())
         futuro.add_done_callback(self.manejar_resultado_desacople)
 
@@ -173,13 +174,15 @@ class NodoControlMovimiento(Node):
         self.get_logger().info('Desacople completado.')
         self.desacoplando = False
 
+    # --- Foto ---
+
     def guardar_foto(self):
-        if self.ultima_imagen is not None:
-            ruta = os.path.expanduser('~/voice_controlled_turtlebot/src/snapshot.png')
-            cv2.imwrite(ruta, self.ultima_imagen)
-            self.get_logger().info(f'Foto guardada: {ruta}')
-        else:
-            self.get_logger().warn('Aun no se ha recibido imagen.')
+        if self.ultima_imagen is None:
+            self.get_logger().warn('Aún no se ha recibido imagen de la cámara.')
+            return
+        ruta = '/tmp/turtlebot_snapshot.png'
+        cv2.imwrite(ruta, self.ultima_imagen)
+        self.get_logger().info(f'Foto guardada en: {ruta}')
 
 
 def main(args=None):
@@ -188,6 +191,7 @@ def main(args=None):
     rclpy.spin(nodo)
     nodo.destroy_node()
     rclpy.shutdown()
+
 
 if __name__ == '__main__':
     main()

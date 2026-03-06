@@ -3,9 +3,9 @@
 <package format="3">
   <name>voice_controlled_turtlebot</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
-  <maintainer email="anoushkasatav002@gmail.com">anushkasatav</maintainer>
-  <license>TODO: License declaration</license>
+  <description>Asistente robótico autónomo con interacción afectiva — TFM UDC</description>
+  <maintainer email="todo@udc.es">m</maintainer>
+  <license>Apache-2.0</license>
 
   <depend>rclpy</depend>
   <depend>std_msgs</depend>

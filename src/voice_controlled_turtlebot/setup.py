@@ -13,9 +13,9 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='anushkasatav',
-    maintainer_email='anoushkasatav002@gmail.com',
-    description='TurtleBot4 controlado por voz',
+    maintainer='m',
+    maintainer_email='todo@udc.es',
+    description='Asistente robótico autónomo con interacción afectiva — TFM UDC',
     license='Apache-2.0',
     entry_points={
         'console_scripts': [
@@ -24,6 +24,7 @@ setup(
             'movement_controller_node = voice_controlled_turtlebot.movement_controller_node:main',
             'object_detector_node = voice_controlled_turtlebot.object_detector_node:main',
             'gui_dashboard_node = voice_controlled_turtlebot.gui_dashboard_node:main',
+            'nodo_dialogo_node = voice_controlled_turtlebot.nodo_dialogo_node:main',
         ],
     },
 )

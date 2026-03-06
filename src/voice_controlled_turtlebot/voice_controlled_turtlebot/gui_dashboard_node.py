@@ -30,6 +30,8 @@ class PuenteSignales(QObject):
     senal_objetos = pyqtSignal(str)
     senal_laser = pyqtSignal(str)
     senal_imu = pyqtSignal(str)
+    senal_respuesta = pyqtSignal(str)
+    senal_estado_emocional = pyqtSignal(str)
 
 puente = PuenteSignales()
 
@@ -54,6 +56,8 @@ class NodoDashboard(Node):
         self.create_subscription(String, '/voice_text', self.cb_texto_voz, 10)
         self.create_subscription(String, '/voice_command', self.cb_comando_voz, 10)
         self.create_subscription(String, '/detected_objects', self.cb_objetos, 10)
+        self.create_subscription(String, '/robot_respuesta', self.cb_respuesta, 10)
+        self.create_subscription(String, '/estado_emocional', self.cb_estado_emocional, 10)
 
         self.get_logger().info('Dashboard iniciado.')
 
@@ -70,15 +74,15 @@ class NodoDashboard(Node):
         info = (f'Acel: ({msg.linear_acceleration.x:.2f}, '
                 f'{msg.linear_acceleration.y:.2f}, '
                 f'{msg.linear_acceleration.z:.2f})')
-        if self.cnt_imu % 10 == 0:
-            self.get_logger().debug(f'IMU: {info}')
+        #f self.cnt_imu % 10 == 0:
+            
+            #self.get_logger().debug(f'IMU: {info}')
         puente.senal_imu.emit(info)
 
     def cb_laser(self, msg):
         self.cnt_laser += 1
         info = f'Rayos: {len(msg.ranges)}, Min: {msg.angle_min:.2f}, Max: {msg.angle_max:.2f}'
-        if self.cnt_laser % 5 == 0:
-            self.get_logger().debug(f'Laser: {info}')
+      
         puente.senal_laser.emit(info)
 
     def cb_camara(self, msg):
@@ -87,8 +91,6 @@ class NodoDashboard(Node):
             imagen_cv = self.puente_cv.imgmsg_to_cv2(msg, desired_encoding='rgb8')
             h, w, _ = imagen_cv.shape
             qt_imagen = QImage(imagen_cv.data, w, h, 3 * w, QImage.Format.Format_RGB888)
-            if self.cnt_camara % 10 == 0:
-                self.get_logger().info(f'Camara: frame {self.cnt_camara} ({w}x{h})')
             puente.senal_camara.emit(qt_imagen)
         except Exception as e:
             self.get_logger().error(f'Error camara: {e}')
@@ -109,6 +111,12 @@ class NodoDashboard(Node):
 
     def cb_objetos(self, msg):
         puente.senal_objetos.emit(msg.data)
+
+    def cb_respuesta(self, msg):
+        puente.senal_respuesta.emit(msg.data)
+
+    def cb_estado_emocional(self, msg):
+        puente.senal_estado_emocional.emit(msg.data)
 
 
 class VentanaDashboard(QMainWindow):
@@ -170,7 +178,8 @@ class VentanaDashboard(QMainWindow):
         layout_centro = QVBoxLayout()
         for titulo, attr in [('Texto de voz', 'texto_voz'),
                               ('Comando detectado', 'texto_comando'),
-                              ('Objetos detectados', 'texto_objetos')]:
+                              ('Objetos detectados', 'texto_objetos'),
+                              ('Respuesta del robot', 'texto_respuesta')]:
             etiq = QLabel(titulo)
             etiq.setFont(QFont('Arial', 12, QFont.Weight.Bold))
             etiq.setStyleSheet('color: #4ade80;')
@@ -180,6 +189,10 @@ class VentanaDashboard(QMainWindow):
             widget_texto.setMaximumHeight(120)
             setattr(self, attr, widget_texto)
             layout_centro.addWidget(widget_texto)
+        self.etiq_estado_emocional = QLabel('Estado: neutral')
+        self.etiq_estado_emocional.setFont(QFont('Arial', 10))
+        self.etiq_estado_emocional.setStyleSheet('color: #facc15;')
+        layout_centro.addWidget(self.etiq_estado_emocional)
         layout_centro.addStretch()
 
         layout_contenido.addLayout(layout_izq, 2)
@@ -195,6 +208,10 @@ class VentanaDashboard(QMainWindow):
         puente.senal_texto_voz.connect(self.texto_voz.setText)
         puente.senal_comando_voz.connect(self.texto_comando.setText)
         puente.senal_objetos.connect(self.texto_objetos.setText)
+        puente.senal_respuesta.connect(self.texto_respuesta.setText)
+        puente.senal_estado_emocional.connect(
+            lambda v: self.etiq_estado_emocional.setText(f'Estado: {v}')
+        )
 
     def _actualizar_camara(self, qt_imagen):
         pixmap = QPixmap.fromImage(qt_imagen)
