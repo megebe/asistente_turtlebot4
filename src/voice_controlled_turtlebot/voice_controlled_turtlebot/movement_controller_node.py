@@ -2,7 +2,7 @@ import os
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
-from std_msgs.msg import String
+from std_msgs.msg import String, Bool
 from geometry_msgs.msg import Twist
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
@@ -16,15 +16,17 @@ class NodoControlMovimiento(Node):
     def __init__(self):
         super().__init__('movement_controller_node')
 
+        self._tts_activo = False
+        self.create_subscription(Bool, '/tts_activo', self._cb_tts, 10)
         self.create_subscription(String, '/voice_command', self.cb_comando, 10)
 
-        self.pub_cmd_vel = self.create_publisher(Twist, '/rpi_13/cmd_vel', 10)
+        self.pub_cmd_vel = self.create_publisher(Twist, '/cmd_vel', 10)
 
-        self.cliente_acoplar = ActionClient(self, Dock, '/rpi_13/dock')
-        self.cliente_desacoplar = ActionClient(self, Undock, '/rpi_13/undock')
+        self.cliente_acoplar = ActionClient(self, Dock, '/dock')
+        self.cliente_desacoplar = ActionClient(self, Undock, '/undock')
 
         self.esta_acoplado = None
-        self.create_subscription(DockStatus, '/rpi_13/dock_status', self.cb_estado_acople, 10)
+        self.create_subscription(DockStatus, '/dock_status', self.cb_estado_acople, 10)
 
         # Guardias para evitar envíos duplicados de acople/desacople
         self.acoplando = False
@@ -47,11 +49,17 @@ class NodoControlMovimiento(Node):
     def cb_imagen(self, msg):
         self.ultima_imagen = self.puente_cv.imgmsg_to_cv2(msg, desired_encoding='bgr8')
 
+    def _cb_tts(self, msg):
+        self._tts_activo = msg.data
+
     def cb_comando(self, msg):
-        comando = msg.data.lower()
-        # Ignorar mensajes del parser que no son comandos de movimiento
-        if comando.startswith('pregunta:') or comando == 'wake':
+        if self._tts_activo:
             return
+        comando = msg.data.lower()
+        # Ignorar rápidamente si no es movimiento
+        if comando.startswith('pregunta:') or comando in ('wake', 'ver', 'tomar_foto'):
+            return
+        self.get_logger().info(f'Comando recibido: {comando}')
         self.twist_actual = Twist()
         self.en_movimiento = False
 
