@@ -14,6 +14,8 @@ def generate_launch_description():
              name='object_detector_node', output='screen'),
         Node(package='voice_controlled_turtlebot', executable='nodo_dialogo_node',
              name='nodo_dialogo_node', output='screen'),
+        Node(package='prueba_nav', executable='nodo_navegacion',
+             name='nodo_navegacion', output='screen'),
     ]
 
     return LaunchDescription(nodos)
