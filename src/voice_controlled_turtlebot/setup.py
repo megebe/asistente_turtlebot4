@@ -25,6 +25,7 @@ setup(
             'object_detector_node = voice_controlled_turtlebot.object_detector_node:main',
             'gui_dashboard_node = voice_controlled_turtlebot.gui_dashboard_node:main',
             'nodo_dialogo_node = voice_controlled_turtlebot.nodo_dialogo_node:main',
+            'nodo_navegacion_node = voice_controlled_turtlebot.nodo_navegacion:main',
         ],
     },
 )
